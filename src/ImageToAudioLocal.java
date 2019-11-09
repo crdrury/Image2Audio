@@ -137,6 +137,7 @@ public class ImageToAudioLocal {
         float compTimer = -1;
 
         float squareSteps = 3;
+        float sawSteps = 9;
 
         System.out.println("Generating audio.......");
 
@@ -175,14 +176,17 @@ public class ImageToAudioLocal {
                         break;
                     case SQUARE:
                         waveValue = 0;
-                        for (int s = 1; s < squareSteps * 2; s += 2) {
+                        for (int s = 1; s <= squareSteps * 2; s += 2) {
                             waveValue += Math.sin(angle / s) * (4 / Math.PI / s);
                         }
 
 //                        System.out.println(waveValue);
                         break;
                     case SAWTOOTH:
-                        waveValue = 1 - n / (SAMPLE_RATE / freq);
+                        waveValue = 0;
+                        for (int s = 1; s <= sawSteps; s++) {
+                            waveValue += Math.sin(angle * s) * (1.0 / s);
+                        }
                         break;
                     case TRIANGLE:
                         if (angle <= Math.PI / 2)
@@ -198,16 +202,6 @@ public class ImageToAudioLocal {
                     waveValue *= 127.0 * (lastVol + (n / (SAMPLE_RATE * dur) * (vol - lastVol)));
                 } else {
                     waveValue *= 127.0 * vol;
-                }
-
-                if (waveType == WaveType.SAWTOOTH && n == 0 && arrayIndex > 0) {
-                    // Smooth out the pops
-                    int smoothFrames = 500;
-                    double lastValue = byteStream[arrayIndex - 1];
-                    double chunkSize = (waveValue - lastValue) / smoothFrames;
-                    for (int s = 0 ; s < smoothFrames; s++) {
-                        byteStream[arrayIndex++] = (byte)(lastValue + chunkSize * s);
-                    }
                 }
 
                 // Dynamic range compression attempt
