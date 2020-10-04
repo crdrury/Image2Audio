@@ -10,134 +10,63 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.net.URL;
 import java.util.Arrays;
-import java.util.Scanner;
+
+/**
+*       ImageToAudioLocal
+ *
+ *      <p>
+ *          The main class in the Image2Audio web app project.
+ *          This class contains the program entry point and the main process.
+ *      </p>
+ *
+ *      <p>
+ *          The class name currently contains 'Local' because the original design contained
+ *          a separate class for operating on a remote image on the web. With the move to a
+ *          web app environment, only this version, for operating on a local image resource,
+ *          is necessary. Eventually this will probably be renamed to remove 'Local' and reflect
+ *          the 'Image2Audio' stylization used in the web app.
+ *      </p>
+ *
+ *       @author Chris Drury
+ */
 
 public class ImageToAudioLocal {
-    // Audio format info
-    public static final float SAMPLE_RATE = 8000f;
-    public static final int BIT_DEPTH = 8;
+    public enum WaveType { SINE, SQUARE, SAWTOOTH, TRIANGLE }       // Types of sound waves that can be used. Includes SINE, SQUARE, SAWTOOTH, and TRIANGLE.
+    float scaleToWidth = 20f;                                       // The input image will be down-scaled to this width.
+    float scaleToHeight = 20f;                                      // The input image will be down-scaled to this height.
 
-    // Wave type values
-    public enum WaveType { SINE, SQUARE, SAWTOOTH, TRIANGLE }
-    WaveType waveType;
-
-    // Downscale the image to avoid 5-hour audio files
-    float scaleToWidth = 20f;
-    float scaleToHeight = 20f;
-
-    boolean[][] allowPitch;
-    int musicalScale;
-    String audioFileName = "ImageSong.wav";
-
-    public ImageToAudioLocal(String[] args) {
-        // Define the musical scales
-        allowPitch = new boolean[4][0];
-        allowPitch[0] = new boolean[] {
-                true, true, true, true, true, true,
-                true, true, true, true, true, true };
-        allowPitch[1] = new boolean[] {
-                true, false, true, false, true, true,
-                false, true, false, true, false, true };
-        allowPitch[2] = new boolean[] {
-                true, false, false, true, false, true,
-                false, true, false, false, true, false };
-        allowPitch[3] = new boolean[] {
-                true, false, false, true, false, false,
-                true, false, false, true, false, false};
-
+    public ImageToAudioLocal(String url, WaveType waveType, int musicalScaleInt, String outputFilepath) {
         Image image = null;
-        if (args.length == 4) {
-            try {
-                image = ImageIO.read(new URL(args[0]));
-            } catch (Exception e) {
-                System.out.println("Invalid URL.");
-                System.exit(0);
-            }
-            int t = Integer.parseInt(args[1]);
-            if (t < waveType.values().length)
-                waveType = WaveType.values()[t];
-            else {
-                System.out.println("Invalid wave type");
-                System.exit(0);
-            }
-            musicalScale = Integer.parseInt(args[2]);
-            audioFileName = args[3];
-
-            System.out.println("URL = " + args[0]);
-            System.out.println("Output = " + args[3]);
-        } else {
-            // Request the name of the image to use
-            Scanner scanner = new Scanner(System.in);
-            System.out.println("Image filepath: ");
-            String filepath = scanner.next();
-            image = Toolkit.getDefaultToolkit().createImage(getClass().getResource(filepath));
-            System.out.println("Wave type: ");
-            System.out.println("0=sine, 1=square, 2=sawtooth, 3=triangle");
-            int t = scanner.nextInt();
-            if (t < waveType.values().length)
-                waveType = WaveType.values()[t];
-            else {
-                System.out.println("Invalid wave type");
-                System.exit(0);
-            }
-            System.out.println("Choose a scale: ");
-            System.out.println("0=chromatic, 1=major, 2=pentatonic minor, 3=diminished");
-            musicalScale = scanner.nextInt();
+        try {
+            image = ImageIO.read(new URL(url));
+        } catch (Exception e) {
+            System.out.println("Invalid URL.");
+            System.exit(0);
         }
-        if (musicalScale > allowPitch.length) {
+
+        System.out.println("URL = " + url);
+        System.out.println("Output = " + outputFilepath);
+
+        boolean[] musicalScale = MusicalScale.getScaleByNumber(musicalScaleInt);
+        if (musicalScale == null) {
             System.out.println("Invalid scale");
             System.exit(0);
         }
 
-
-        // Load the image and scale it down
-
-        while (image.getWidth(null) == -1) {}
-        float imW = image.getWidth(null);
-        float imH = image.getHeight(null);
-        float wScale = scaleToWidth / imW;
-        float hScale = scaleToHeight / imH;
-        float scale = Math.min(wScale, hScale);
-
-        // Convert to a BufferedImage
-        BufferedImage bIm = new BufferedImage((int)(imW * scale), (int)(imH * scale), BufferedImage.TYPE_3BYTE_BGR);
-        try {
-            Thread.sleep(500);
-        } catch (Exception e) {
-        }
-        bIm.getGraphics().drawImage(image, 0, 0, (int)(imW * scale), (int)(imH * scale), null);
-
-        byte[] pixels = ((DataBufferByte) bIm.getRaster().getDataBuffer()).getData();   // Pixel data from the image
+        byte[] pixels = ((DataBufferByte) scaleImage(image, scaleToWidth, scaleToHeight).getRaster().getDataBuffer()).getData();   // Pixel data from the image
         int maxArraySize = (int)(Math.pow(2, 24) - 1);
         byte[] byteStream = new byte[maxArraySize];                                     // A big array for storing data
         int arrayIndex = 0;                                                             // Index for storing data in the array
         int r, g, b;                                                                    // Color data of each pixel
         double angle;                                                                   // Used to create the sine wave
 
-        int scaleSize = 12;                                                             // How many notes in a chromatic scale
-        float octaves = 3;                                                              // Octave range of this song
-        double rootNoteFreq = 65.4;                                                     // Frequency of Middle-C
-        double oneTwelfth = 1d / 12;                                                    // Used for calculating pitch
-        int minDur = 1, maxDur = 4;                                                     // Duration range
-        float minVol = 0.4f, maxVol = 1f;                                               // Volume range
-
         int freq;                                                                       // Calculated frequency for each pixel
         int dur;                                                                        // Calculated duration
         float vol;                                                                      // Calculated volume
         float lastVol = -1;                                                             // The last note's volume for smooth transitions
 
-        // WIP dynamic range compression variables
-        boolean bypass = true;
-        float threshold = 100f;
-        float ratio = 4.0f;
-        float makeUpGain = 3f;
-        double attack = 10f;
-        double hold = 10f;
-        double release = 20f;
-        float compTimer = -1;
-
-        float squareSteps = 3;
-        float sawSteps = 9;
+        // Compressor bypassed until working properly
+        Compressor comp = new Compressor(true, 100f, 4f, 3f, 10d, 10d, 20d);
 
         System.out.println("Generating audio.......");
 
@@ -148,35 +77,35 @@ public class ImageToAudioLocal {
             b = pixels[i + 2];                                                          // Determines volume
 
             // Calculate how many half-steps from middle-C we are
-            int halfStepsUp = (int)(((float)r / 255) * ((scaleSize * octaves - 1)));
+            int halfStepsUp = (int)(((float)r / 255) * ((MusicalConstants.scaleSize * MusicalConstants.octaves - 1)));
 
             // If this pitch isn't in the scale, drop it to an allowed pitch
-            while (!allowPitch[musicalScale][Math.abs(halfStepsUp%scaleSize)]) {
+            while (!musicalScale[Math.abs(halfStepsUp % MusicalConstants.scaleSize)]) {
                 halfStepsUp--;
             }
 
             // Calculate note values
-            freq = (int)(Math.pow(Math.pow(2, oneTwelfth), halfStepsUp) * rootNoteFreq);
-            dur = (int)(minDur + ((float)g / 255) * (maxDur - minDur));
-            vol = (minVol + ((float)b / 255) * (maxVol - minVol));
+            freq = (int)(Math.pow(Math.pow(2, MusicalConstants.oneTwelfth), halfStepsUp) * MusicalConstants.rootNoteFreq);
+            dur = (int)(MusicalConstants.minDur + ((float)g / 255) * (MusicalConstants.maxDur - MusicalConstants.minDur));
+            vol = (MusicalConstants.minVol + ((float)b / 255) * (MusicalConstants.maxVol - MusicalConstants.minVol));
 
-            for (int n = 0; n < SAMPLE_RATE * dur; n++) {
+            double waveValue = 0;
+            for (int n = 0; n < MusicalConstants.SAMPLE_RATE * dur; n++) {
                 // Shouldn't happen with downscaling, but just in case...
                 if (arrayIndex >= byteStream.length) {
-                    System.out.println("Max array length reached");
+                    System.out.println("Max array length reached. Cutting audio short.");
                     break;
                 }
 
                 // Add this wave to the byte array
-                angle = (n / ((SAMPLE_RATE) / freq) * 2.0 * Math.PI) % (Math.PI * 2);
-                double waveValue = 0;
+                angle = (n / ((MusicalConstants.SAMPLE_RATE) / freq) * 2.0 * Math.PI) % (Math.PI * 2);
                 switch (waveType) {
                     case SINE:
                         waveValue = Math.sin(angle);
                         break;
                     case SQUARE:
                         waveValue = 0;
-                        for (int s = 1; s <= squareSteps * 2; s += 2) {
+                        for (int s = 1; s <= MusicalConstants.squareSteps * 2; s += 2) {
                             waveValue += Math.sin(angle / s) * (4 / Math.PI / s);
                         }
 
@@ -184,7 +113,7 @@ public class ImageToAudioLocal {
                         break;
                     case SAWTOOTH:
                         waveValue = 0;
-                        for (int s = 1; s <= sawSteps; s++) {
+                        for (int s = 1; s <= MusicalConstants.sawSteps; s++) {
                             waveValue += Math.sin(angle * s) * (1.0 / s);
                         }
                         break;
@@ -199,30 +128,14 @@ public class ImageToAudioLocal {
                 }
 
                 if (lastVol != -1) {
-                    waveValue *= 127.0 * (lastVol + (n / (SAMPLE_RATE * dur) * (vol - lastVol)));
+                    waveValue *= 127.0 * (lastVol + (n / (MusicalConstants.SAMPLE_RATE * dur) * (vol - lastVol)));
                 } else {
                     waveValue *= 127.0 * vol;
                 }
 
                 // Dynamic range compression attempt
-                if (!bypass) {
-                    if (Math.abs(waveValue) > threshold) {
-                        compTimer = 0f;
-                    }
-                    double dif = waveValue - threshold;
-                    if (compTimer < attack) {
-                        double attackTime = compTimer - attack - hold;
-                        double percent = attackTime / attack;
-                        waveValue = threshold + dif / ratio / percent;
-                    } else if (compTimer < attack + hold) {
-                        waveValue = threshold + dif / ratio;
-                    } else if (compTimer < attack + hold + release) {
-                        double releaseTime = compTimer - attack - hold;
-                        double percent = releaseTime / release;
-                        waveValue = threshold + dif / ratio * percent;
-                    }
-                    compTimer += 1 / SAMPLE_RATE;
-                    waveValue += makeUpGain;
+                if (!comp.bypass) {
+                    waveValue = comp.compress(waveValue);
                 }
 
                 byteStream[arrayIndex++] = (byte)(waveValue);
@@ -235,10 +148,9 @@ public class ImageToAudioLocal {
 
         // Write the byte array to an audio file
         AudioFormat format = new AudioFormat(44100, 8, 1, true, true);
-        AudioInputStream ais = new AudioInputStream(
-                new ByteArrayInputStream(bytes), format, bytes.length / format.getFrameSize());
+        AudioInputStream ais = new AudioInputStream(new ByteArrayInputStream(bytes), format, bytes.length / format.getFrameSize());
         try {
-            AudioSystem.write(ais, AudioFileFormat.Type.WAVE, new File(audioFileName));
+            AudioSystem.write(ais, AudioFileFormat.Type.WAVE, new File(outputFilepath));
         }
         catch(Exception e) {
             e.printStackTrace();
@@ -247,7 +159,38 @@ public class ImageToAudioLocal {
         System.out.println("Success!");
     }
 
+    private BufferedImage scaleImage(Image im, float width, float height) {
+        while (im.getWidth(null) == -1) {}
+        float imW = im.getWidth(null);
+        float imH = im.getHeight(null);
+        float wScale = scaleToWidth / imW;
+        float hScale = scaleToHeight / imH;
+        float scale = Math.min(wScale, hScale);
+
+        // Convert to a BufferedImage
+        BufferedImage bIm = new BufferedImage((int)(imW * scale), (int)(imH * scale), BufferedImage.TYPE_3BYTE_BGR);
+        try {
+            Thread.sleep(500);
+        } catch (Exception e) {
+        }
+        bIm.getGraphics().drawImage(im, 0, 0, (int)(imW * scale), (int)(imH * scale), null);
+
+        return bIm;
+    }
+
     public static void main(String[] args) {
-        new ImageToAudioLocal(args);
+        if (args.length == 4) {
+            try {
+                String url = args[0];
+                int waveTypeInt = Integer.parseInt(args[1]);
+                int musicalScale = Integer.parseInt(args[2]);
+                String outputFilepath = args[3];
+
+                new ImageToAudioLocal(url, WaveType.values()[waveTypeInt], musicalScale, outputFilepath);
+            } catch (NumberFormatException ex) {
+                System.err.println("Invalid numeric argument.");
+            }
+        } else
+            System.err.println("Wrong number of arguments. Exiting....");
     }
 }
